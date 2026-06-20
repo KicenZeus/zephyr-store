@@ -17,6 +17,7 @@ const flashSaleItems = [
     endTime: Date.now() + 3600000,
     sold: 450,
     stock: 1000,
+    slug: "mobile-legends",
   },
   {
     id: 2,
@@ -29,11 +30,12 @@ const flashSaleItems = [
     endTime: Date.now() + 7200000,
     sold: 890,
     stock: 500,
+    slug: "free-fire",
   },
   {
     id: 3,
     game: "Genshin Impact",
-    item: "60 Primogems",
+    item: "60 Crystals",
     originalPrice: 18000,
     salePrice: 12600,
     discount: 30,
@@ -41,6 +43,7 @@ const flashSaleItems = [
     endTime: Date.now() + 1800000,
     sold: 230,
     stock: 300,
+    slug: "genshin-impact",
   },
   {
     id: 4,
@@ -53,6 +56,59 @@ const flashSaleItems = [
     endTime: Date.now() + 10800000,
     sold: 156,
     stock: 200,
+    slug: "valorant",
+  },
+  {
+    id: 5,
+    game: "PUBG Mobile",
+    item: "300 UC",
+    originalPrice: 55000,
+    salePrice: 38500,
+    discount: 30,
+    image: "/card/pubg.jpg",
+    endTime: Date.now() + 5400000,
+    sold: 320,
+    stock: 400,
+    slug: "pubg",
+  },
+  {
+    id: 6,
+    game: "Clash Of Clans",
+    item: "500 Gems",
+    originalPrice: 30000,
+    salePrice: 21000,
+    discount: 30,
+    image: "/card/clash-of-clans.jpg",
+    endTime: Date.now() + 3600000,
+    sold: 180,
+    stock: 250,
+    slug: "clash-of-clans",
+  },
+  {
+    id: 7,
+    game: "Clash Royale",
+    item: "80 Gems",
+    originalPrice: 18000,
+    salePrice: 12600,
+    discount: 30,
+    image: "/card/clash-royale.jpg",
+    endTime: Date.now() + 7200000,
+    sold: 250,
+    stock: 350,
+    slug: "clash-royale",
+  },
+  {
+    id: 8,
+    game: "Honor Of Kings",
+    item: "300 Vouchers",
+    originalPrice: 60000,
+    salePrice: 42000,
+    discount: 30,
+    image: "/card/honor-of-kings.jpg",
+    endTime: Date.now() + 10800000,
+    sold: 400,
+    stock: 500,
+    slug: "honor-of-kings",
   },
 ];
 
@@ -97,7 +153,7 @@ function CountdownTimer({ endTime }) {
 
 function FlashSaleCard({ item }) {
   return (
-    <Link href="/order/mobile-legends" className="group">
+    <Link href={`/order/${item.slug}`} className="group">
       <div className="bg-zinc-900/50 border border-white/10 rounded-3xl overflow-hidden hover:border-yellow-400/30 transition-all hover:-translate-y-1">
         <div className="relative">
           <img src={item.image} alt={item.game} className="w-full h-44 object-cover" />
