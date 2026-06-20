@@ -17,12 +17,6 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      setError("Setup .env.local dengan Supabase credentials terlebih dahulu!");
-      setLoading(false);
-      return;
-    }
-
     const supabase = createClient();
 
     try {

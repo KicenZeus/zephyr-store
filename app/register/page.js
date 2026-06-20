@@ -20,11 +20,6 @@ export default function RegisterPage() {
     if (form.password !== form.confirm) return setError("Password tidak cocok.");
     if (form.password.length < 6) return setError("Password minimal 6 karakter.");
 
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      setError("Setup .env.local dengan Supabase credentials terlebih dahulu!");
-      return;
-    }
-
     setLoading(true);
     const supabase = createClient();
 
