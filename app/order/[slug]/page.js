@@ -42,7 +42,7 @@ export default function OrderPage() {
     setIsProcessing(true);
 
     try {
-      // Insert transaction to database
+      // Insert transaction to database with status "pending"
       const transactionId = `TRX-${Date.now()}`;
       const { error } = await supabase.from("transactions").insert({
         id: transactionId,
@@ -50,7 +50,7 @@ export default function OrderPage() {
         game: gameData.name,
         item: selectedItem.amount,
         amount: totalPrice,
-        status: "success", // Untuk demo, langsung success
+        status: "pending", // status pending dulu
         payment_method: selectedMethod.name,
       });
 
@@ -72,24 +72,18 @@ export default function OrderPage() {
               console.error('❌ Error creating profile:', createProfileError);
               throw createProfileError;
             }
-            
-            // Dapatkan profile yang baru dibuat
-            const { data: newProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-            currentProfile = newProfile;
           }
           
-          // Step 2: Update points user (optional, no error handling needed)
-          try {
-            await supabase.from('profiles').upsert({
-              id: user.id,
-              points: (currentProfile?.points || 0) + Math.floor(totalPrice / 1000),
-            });
-          } catch (e) {
-            // Ignore points update errors, transaction is still successful
-          }
+          // Simpan data transaksi ke session storage untuk halaman payment
+          sessionStorage.setItem(`payment_${transactionId}`, JSON.stringify({
+            gameName: gameData.name,
+            nominal: selectedItem.amount,
+            totalPrice: totalPrice,
+            selectedPayment: selectedPayment
+          }));
           
-          alert("✅ Pembayaran berhasil! Pesananmu sedang diproses.");
-          router.push("/transactions");
+          // Arahkan ke halaman menunggu pembayaran
+          router.push(`/payment/${transactionId}`);
         } catch (err) {
           console.error("Error in payment flow:", err);
           let errorText = "Gagal memproses pembayaran";

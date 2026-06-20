@@ -23,7 +23,7 @@ export default function Navbar() {
       if (user) {
         const { data } = await supabase
           .from("profiles")
-          .select("name, email")
+          .select("name, email, wallet_index")
           .eq("id", user.id)
           .single();
         setProfile(data);
@@ -143,22 +143,8 @@ export default function Navbar() {
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500 group-hover:text-primary transition-colors"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 12 2 2 4-4"/></svg>
                       <span className="text-[11px] font-bold text-zinc-400 group-hover:text-white transition-colors">Riwayat Transaksi</span>
                     </Link>
-                    <Link
-                      href="/web3-transactions"
-                      onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500 group-hover:text-primary transition-colors"><path d="m13 2-2 10h9L7 22l2-10H1L13 2z"/></svg>
-                      <span className="text-[11px] font-bold text-zinc-400 group-hover:text-white transition-colors">On-Chain History</span>
-                    </Link>
-                    <Link
-                      href="/blockchain-explorer"
-                      onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500 group-hover:text-primary transition-colors"><path d="M6 12A6 6 0 1 0 6 0a6 6 0 0 0 0 12z"/><path d="M18 12a6 6 0 1 0 6 0 6 6 0 0 0-6 0z"/><path d="M12 18a6 6 0 1 0 6 0 6 6 0 0 0-6 0z"/></svg>
-                      <span className="text-[11px] font-bold text-zinc-400 group-hover:text-white transition-colors">Blockchain Explorer</span>
-                    </Link>
+
+                    
                   </div>
                   {/* Logout */}
                   <div className="p-2 border-t border-white/5">
@@ -206,12 +192,14 @@ export default function Navbar() {
             <Link href="/calculator">
               <NavItem icon="calculator" label="Kalkulator" active={pathname === "/calculator"} />
             </Link>
-            <Link href="/web3-transactions">
-              <NavItem icon="zap" label="On-Chain" active={pathname === "/web3-transactions"} />
-            </Link>
-            <Link href="/blockchain-explorer">
-              <NavItem icon="link" label="Blockchain" active={pathname === "/blockchain-explorer"} />
-            </Link>
+            
+            {/* Admin Link - Only for wallet_index 0 */}
+            {profile?.wallet_index === 0 && (
+              <Link href="/admin">
+                <NavItem icon="link" label="Admin" color="text-fuchsia-400" active={pathname === "/admin"} />
+              </Link>
+            )}
+
           </div>
           <div className="hidden md:flex items-center text-zinc-500 gap-4">
             <div className="flex items-center gap-1.5">
@@ -232,7 +220,7 @@ function NavItem({ icon, label, active = false, color = "" }) {
     "search": <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M10 13a2 2 0 1 0 4 0 2 2 0 0 0-4 0Z"/><path d="m16 19-1.5-1.5"/></svg>,
     "trello": <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><rect width="3" height="9" x="7" y="7"/><rect width="3" height="5" x="14" y="7"/></svg>,
     "calculator": <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>,
-    "link": <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+    "link": <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15v2"/><path d="M12 9v2"/><path d="M12 3v2"/><circle cx="12" cy="18" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="6" r="1"/></svg>,
   };
   return (
     <div className={`flex items-center gap-2 cursor-pointer py-1 border-b-2 transition-all group ${active ? "border-primary text-white" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>

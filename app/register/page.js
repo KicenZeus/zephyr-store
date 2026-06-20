@@ -24,12 +24,18 @@ export default function RegisterPage() {
     const supabase = createClient();
 
     try {
-      // Step 1: Get count for wallet index FIRST (before signup)
-      const { count } = await supabase
+      // Step 1: Get all used wallet indexes FIRST (before signup)
+      const { data: profiles } = await supabase
         .from('profiles')
-        .select('*', { count: 'exact', head: true });
+        .select('wallet_index');
 
-      const walletIndex = getNextWalletIndex(count || 0);
+      // Extract used indexes
+      const usedIndexes = profiles 
+        ? profiles.map(p => p.wallet_index).filter(i => i !== null && i !== undefined) 
+        : [];
+
+      // Get next available index
+      const walletIndex = getNextWalletIndex(usedIndexes);
       const wallet = getHardhatWallet(walletIndex);
 
       // Step 2: Sign up the user

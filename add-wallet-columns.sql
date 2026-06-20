@@ -6,3 +6,4 @@ ALTER TABLE public.profiles
 ADD COLUMN IF NOT EXISTS wallet_address TEXT,
 ADD COLUMN IF NOT EXISTS wallet_private_key TEXT,
 ADD COLUMN IF NOT EXISTS wallet_index INTEGER DEFAULT 0;
+

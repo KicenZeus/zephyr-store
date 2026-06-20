@@ -5,6 +5,75 @@ import Footer from "@/components/layout/footer";
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 
+// Fungsi untuk menghitung hash di frontend (mirip dengan fungsi calculate_hash di SQL)
+// Format waktu harus SAMA PERSIS dengan di SQL!
+function formatDateForHash(dateString) {
+  const date = new Date(dateString);
+  // Format sesuai dengan SQL (contoh: 2024-06-21 12:34:56.789012+00)
+  // Atau kita gunakan format ISO yang sama dengan yang disimpan di Supabase!
+  return date.toISOString().replace("T", " ").replace("Z", "+00");
+}
+
+// Fungsi untuk mengubah format created_at agar SAMA PERSIS dengan PostgreSQL!
+function formatCreatedAtForHash(createdAtStr) {
+  // Ganti 'T' dengan spasi dan hapus ':' di zona waktu (jika ada)
+  // Contoh: 2026-06-20T18:20:28.695584+00:00 → 2026-06-20 18:20:28.695584+00
+  return createdAtStr.replace("T", " ").replace(/:00$/, "");
+}
+
+function calculateTransactionHash(tx) {
+  // Pastikan kita handle prev_hash dengan benar!
+  // Di SQL, untuk genesis block, prev_hashnya adalah 0000..., bukan 'genesis'!
+  const prevHashToUse = tx.prev_hash;
+
+  // Pastikan user_id adalah string lowercase (karena UUID di SQL biasanya lowercase)
+  const userIdStr = String(tx.user_id).toLowerCase();
+  // Pastikan amount adalah string tanpa koma
+  const amountStr = String(tx.amount);
+  // Pastikan nonce adalah string
+  const nonceStr = String(tx.nonce);
+  // Format created_at agar sama dengan di SQL!
+  const createdAtForHash = formatCreatedAtForHash(tx.created_at);
+
+  const data = 
+    tx.id + "|" + 
+    userIdStr + "|" + 
+    tx.game + "|" + 
+    tx.item + "|" + 
+    amountStr + "|" + 
+    createdAtForHash + "|" + 
+    prevHashToUse + "|" + 
+    nonceStr;
+  
+  console.log(`🔍 [DEBUG] Calculating hash for tx: ${tx.id}`);
+  console.log(`📄 Data to hash: "${data}"`);
+  console.log(`🔍 [DEBUG] userId: ${userIdStr} (lowercase)`);
+  console.log(`🔍 [DEBUG] amount: ${amountStr}`);
+  console.log(`🔍 [DEBUG] nonce: ${nonceStr}`);
+  console.log(`🔍 [DEBUG] createdAt (original): ${tx.created_at}`);
+  console.log(`🔍 [DEBUG] createdAt (formatted): ${createdAtForHash}`);
+  
+  // Kita gunakan SHA-256 dari Crypto API browser
+  return new Promise(async (resolve) => {
+    try {
+      const encoder = new TextEncoder();
+      const dataBuffer = encoder.encode(data);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+      
+      console.log(`✅ [DEBUG] Calculated hash: ${hashHex}`);
+      console.log(`🔍 [DEBUG] Block hash from DB: ${tx.block_hash}`);
+      console.log(`✅ [DEBUG] Match: ${hashHex === tx.block_hash}`);
+      
+      resolve(hashHex);
+    } catch (e) {
+      console.error("Error calculating hash:", e);
+      resolve(null);
+    }
+  });
+}
+
 function StatusBadge({ status }) {
   const statusConfig = {
     success: { color: "bg-green-500/20 text-green-400 border-green-500/30", label: "Berhasil" },
@@ -25,7 +94,22 @@ export default function TransactionsPage() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
+  const [verificationStatus, setVerificationStatus] = useState({});
   const supabase = createClient();
+
+  // Fungsi untuk memverifikasi semua transaksi
+  const verifyAllTransactions = async (txs) => {
+    const newStatus = {};
+    for (const tx of txs) {
+      if (tx.block_hash) {
+        const calculatedHash = await calculateTransactionHash(tx);
+        newStatus[tx.id] = calculatedHash === tx.block_hash;
+      } else {
+        newStatus[tx.id] = null; // Tidak ada hash untuk diverifikasi
+      }
+    }
+    setVerificationStatus(newStatus);
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -33,14 +117,42 @@ export default function TransactionsPage() {
       setUser(user);
 
       if (user) {
+        console.log('🔍 [DEBUG] User:', user.id);
         const { data, error } = await supabase
           .from("transactions")
-          .select("*, prev_hash, block_hash, nonce, block_height")
+          .select(`
+            *,
+            transaction_hashes (
+              block_hash,
+              prev_hash,
+              nonce,
+              block_height
+            )
+          `)
           .eq("user_id", user.id)
           .order("created_at", { ascending: false });
 
+        console.log('🔍 [DEBUG] Query result:', JSON.stringify({ data, error }, null, 2));
+
         if (!error && data) {
-          setTransactions(data);
+          // Gabungkan data hash ke transaksi (transaction_hashes adalah OBJECT, bukan array!)
+          const dataWithHash = data.map(tx => {
+            const mapped = ({
+              ...tx,
+              block_hash: tx.transaction_hashes?.block_hash,
+              prev_hash: tx.transaction_hashes?.prev_hash,
+              nonce: tx.transaction_hashes?.nonce,
+              block_height: tx.transaction_hashes?.block_height
+            });
+            console.log(`🔍 [DEBUG] Mapped tx ${tx.id}:`, JSON.stringify(mapped, null, 2));
+            return mapped;
+          });
+          console.log('🔍 [DEBUG] Data with hash:', JSON.stringify(dataWithHash, null, 2));
+          setTransactions(dataWithHash);
+          // Verifikasi semua transaksi setelah mengambil data
+          verifyAllTransactions(dataWithHash);
+        } else if (error) {
+          console.error('❌ [DEBUG] Query error:', error);
         }
       }
       setLoading(false);
@@ -106,26 +218,51 @@ export default function TransactionsPage() {
                   </div>
                 </div>
 
-                {/* Blockchain Info */}
-                {tx.block_hash && (
-                  <div className="bg-zinc-950/50 border border-white/5 rounded-xl p-4 space-y-3">
-                    <p className="text-[10px] font-black text-zinc-400 uppercase">⛓️ Blockchain Info</p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <p className="text-[9px] text-zinc-500 uppercase mb-1">Hash</p>
-                        <p className="text-xs font-mono text-purple-400 break-all">{tx.block_hash}</p>
+                {/* Verification & Blockchain Info */}
+                <div className="space-y-3">
+                  {/* Verification Status */}
+                  <div className="flex items-center gap-2">
+                    {verificationStatus[tx.id] === true && (
+                      <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 px-3 py-1.5 rounded-xl">
+                        <span className="text-green-400">✅</span>
+                        <span className="text-[10px] font-black text-green-400 uppercase">Transaksi Terverifikasi - Data Tidak Dimanipulasi</span>
                       </div>
-                      <div>
-                        <p className="text-[9px] text-zinc-500 uppercase mb-1">Previous Hash</p>
-                        <p className="text-xs font-mono text-pink-400 break-all">{tx.prev_hash}</p>
+                    )}
+                    {verificationStatus[tx.id] === false && (
+                      <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 px-3 py-1.5 rounded-xl">
+                        <span className="text-red-400">❌</span>
+                        <span className="text-[10px] font-black text-red-400 uppercase">PERINGATAN: Data Transaksi Telah Dimanipulasi!</span>
                       </div>
-                      <div>
-                        <p className="text-[9px] text-zinc-500 uppercase mb-1">Nonce</p>
-                        <p className="text-xs font-mono text-green-400">{tx.nonce || 0}</p>
+                    )}
+                    {verificationStatus[tx.id] === null && (
+                      <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 px-3 py-1.5 rounded-xl">
+                        <span className="text-yellow-400">⚠️</span>
+                        <span className="text-[10px] font-black text-yellow-400 uppercase">Tidak Ada Hash Blockchain</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Blockchain Info */}
+                  {tx.block_hash && (
+                    <div className="bg-zinc-950/50 border border-white/5 rounded-xl p-4 space-y-3">
+                      <p className="text-[10px] font-black text-zinc-400 uppercase">⛓️ Blockchain Info</p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <p className="text-[9px] text-zinc-500 uppercase mb-1">Hash</p>
+                          <p className="text-xs font-mono text-purple-400 break-all">{tx.block_hash}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-zinc-500 uppercase mb-1">Previous Hash</p>
+                          <p className="text-xs font-mono text-pink-400 break-all">{tx.prev_hash}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-zinc-500 uppercase mb-1">Nonce</p>
+                          <p className="text-xs font-mono text-green-400">{tx.nonce || 0}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             ))}
           </div>

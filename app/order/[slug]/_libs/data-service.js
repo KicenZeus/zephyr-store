@@ -310,17 +310,56 @@ export const paymentMethods = [
     category: "ewallet",
     label: "E-Wallet & QRIS",
     options: [
-      { id: "qris", name: "QRIS", fee: 0, img: "/payments/qris.png" },
-      { id: "dana", name: "DANA", fee: 500, img: "/payments/dana.png" },
-      { id: "shopeepay", name: "ShopeePay", fee: 500, img: "/payments/shopeepay.png" },
+      { 
+        id: "qris", 
+        name: "QRIS", 
+        fee: 0, 
+        img: "/payments/qris.png",
+        qrImage: "/payments/qris-mu.jpg", // kamu taruh gambar QRIS kamu di public/payments
+        instructions: "Scan QRIS di atas menggunakan aplikasi e-wallet favorit kamu (Gopay, OVO, DANA, dll)"
+      },
+      { 
+        id: "dana", 
+        name: "DANA", 
+        fee: 500, 
+        img: "/payments/dana.png",
+        accountNumber: "081234567890",
+        accountName: "Zephyr Store",
+        instructions: "Transfer ke nomor DANA di atas"
+      },
+      { 
+        id: "shopeepay", 
+        name: "ShopeePay", 
+        fee: 500, 
+        img: "/payments/shopeepay.png",
+        accountNumber: "081234567890",
+        accountName: "Zephyr Store",
+        instructions: "Transfer ke nomor ShopeePay di atas"
+      },
     ],
   },
   {
     category: "va",
     label: "Virtual Account",
     options: [
-      { id: "bca", name: "BCA VA", fee: 1000, img: "/payments/bca.png" },
-      { id: "bri", name: "BRI VA", fee: 1000, img: "/payments/bri.png" },
+      { 
+        id: "bca", 
+        name: "BCA VA", 
+        fee: 1000, 
+        img: "/payments/bca.png",
+        accountNumber: "1234567890",
+        accountName: "Zephyr Store",
+        instructions: "Transfer ke Virtual Account BCA di atas"
+      },
+      { 
+        id: "bri", 
+        name: "BRI VA", 
+        fee: 1000, 
+        img: "/payments/bri.png",
+        accountNumber: "123456789012",
+        accountName: "Zephyr Store",
+        instructions: "Transfer ke Virtual Account BRI di atas"
+      },
     ],
   },
 ];
