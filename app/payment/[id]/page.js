@@ -45,8 +45,7 @@ export default function PaymentWaitingPage() {
     try {
       // Simulasi: Update status transaksi menjadi "success"
       const { error } = await supabase.from("transactions").update({
-        status: "success",
-        updated_at: new Date().toISOString()
+        status: "success"
       }).eq("id", id);
       
       if (!error) {

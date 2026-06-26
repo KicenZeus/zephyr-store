@@ -16,14 +16,14 @@ export default function Navbar() {
   const dropdownRef = useRef(null);
 
   useEffect(() => {
-    // Ambil user session saat mount
+    // Ambil user session saat mount dan saat path berubah
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
       if (user) {
         const { data } = await supabase
           .from("profiles")
-          .select("name, email, wallet_index")
+          .select("name, email, wallet_index, wallet_address")
           .eq("id", user.id)
           .single();
         setProfile(data);
@@ -37,11 +37,13 @@ export default function Navbar() {
       if (!session?.user) {
         setProfile(null);
         setDropdownOpen(false);
+      } else {
+        getUser(); // Refresh profile when auth state changes
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [pathname, supabase]);
 
   // Tutup dropdown kalau klik di luar
   useEffect(() => {
@@ -88,9 +90,9 @@ export default function Navbar() {
         </div>
 
         {/* Auth & Web3 Area */}
-        <div className="flex items-center gap-3">
-          <ConnectWallet />
-          {user ? (
+      <div className="flex items-center gap-3">
+        <ConnectWallet />
+        {user ? (
             /* ── SUDAH LOGIN: Avatar + Dropdown ── */
             <div className="relative" ref={dropdownRef}>
               <button

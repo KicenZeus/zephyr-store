@@ -9,30 +9,19 @@ import { createClient } from "@/lib/supabase/client";
 // Format waktu harus SAMA PERSIS dengan di SQL!
 function formatDateForHash(dateString) {
   const date = new Date(dateString);
-  // Format sesuai dengan SQL (contoh: 2024-06-21 12:34:56.789012+00)
-  // Atau kita gunakan format ISO yang sama dengan yang disimpan di Supabase!
   return date.toISOString().replace("T", " ").replace("Z", "+00");
 }
 
 // Fungsi untuk mengubah format created_at agar SAMA PERSIS dengan PostgreSQL!
 function formatCreatedAtForHash(createdAtStr) {
-  // Ganti 'T' dengan spasi dan hapus ':' di zona waktu (jika ada)
-  // Contoh: 2026-06-20T18:20:28.695584+00:00 → 2026-06-20 18:20:28.695584+00
   return createdAtStr.replace("T", " ").replace(/:00$/, "");
 }
 
-function calculateTransactionHash(tx) {
-  // Pastikan kita handle prev_hash dengan benar!
-  // Di SQL, untuk genesis block, prev_hashnya adalah 0000..., bukan 'genesis'!
+async function calculateTransactionHash(tx) {
   const prevHashToUse = tx.prev_hash;
-
-  // Pastikan user_id adalah string lowercase (karena UUID di SQL biasanya lowercase)
   const userIdStr = String(tx.user_id).toLowerCase();
-  // Pastikan amount adalah string tanpa koma
   const amountStr = String(tx.amount);
-  // Pastikan nonce adalah string
   const nonceStr = String(tx.nonce);
-  // Format created_at agar sama dengan di SQL!
   const createdAtForHash = formatCreatedAtForHash(tx.created_at);
 
   const data = 
@@ -45,33 +34,16 @@ function calculateTransactionHash(tx) {
     prevHashToUse + "|" + 
     nonceStr;
   
-  console.log(`🔍 [DEBUG] Calculating hash for tx: ${tx.id}`);
-  console.log(`📄 Data to hash: "${data}"`);
-  console.log(`🔍 [DEBUG] userId: ${userIdStr} (lowercase)`);
-  console.log(`🔍 [DEBUG] amount: ${amountStr}`);
-  console.log(`🔍 [DEBUG] nonce: ${nonceStr}`);
-  console.log(`🔍 [DEBUG] createdAt (original): ${tx.created_at}`);
-  console.log(`🔍 [DEBUG] createdAt (formatted): ${createdAtForHash}`);
-  
   // Kita gunakan SHA-256 dari Crypto API browser
-  return new Promise(async (resolve) => {
-    try {
-      const encoder = new TextEncoder();
-      const dataBuffer = encoder.encode(data);
-      const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-      
-      console.log(`✅ [DEBUG] Calculated hash: ${hashHex}`);
-      console.log(`🔍 [DEBUG] Block hash from DB: ${tx.block_hash}`);
-      console.log(`✅ [DEBUG] Match: ${hashHex === tx.block_hash}`);
-      
-      resolve(hashHex);
-    } catch (e) {
-      console.error("Error calculating hash:", e);
-      resolve(null);
-    }
-  });
+  try {
+    const encoder = new TextEncoder();
+    const dataBuffer = encoder.encode(data);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+  } catch (e) {
+    return null;
+  }
 }
 
 function StatusBadge({ status }) {
@@ -95,7 +67,31 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [verificationStatus, setVerificationStatus] = useState({});
+  const [checkingStatus, setCheckingStatus] = useState({}); // Untuk loading cek status
   const supabase = createClient();
+  
+  // Fungsi untuk cek status Midtrans secara manual
+  const checkMidtransStatus = async (orderId) => {
+    setCheckingStatus(prev => ({ ...prev, [orderId]: true }));
+    try {
+      const response = await fetch('/api/midtrans/check-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId })
+      });
+      const result = await response.json();
+      if (result.success) {
+        alert(`Status transaksi ${orderId}: ${result.status}`);
+        await refreshAllData();
+      } else {
+        alert('Gagal cek status: ' + (result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Cek status error:', error);
+      alert('Gagal cek status: ' + error.message);
+    }
+    setCheckingStatus(prev => ({ ...prev, [orderId]: false }));
+  };
 
   // Fungsi untuk memverifikasi semua transaksi
   const verifyAllTransactions = async (txs) => {
@@ -111,53 +107,81 @@ export default function TransactionsPage() {
     setVerificationStatus(newStatus);
   };
 
+  // Fungsi untuk REFRESH SEMUA DATA dari Supabase + cek status Midtrans
+  const refreshAllData = async (currentUser) => {
+    const userToUse = currentUser || user;
+    if (!userToUse) return;
+    
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(`
+        *,
+        transaction_hashes (
+          block_hash,
+          prev_hash,
+          nonce,
+          block_height
+        )
+      `)
+      .eq("user_id", userToUse.id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error('Refresh error:', error);
+      return;
+    }
+    
+    const dataWithHash = data.map(tx => ({
+      ...tx,
+      block_hash: tx.transaction_hashes?.block_hash,
+      prev_hash: tx.transaction_hashes?.prev_hash,
+      nonce: tx.transaction_hashes?.nonce,
+      block_height: tx.transaction_hashes?.block_height
+    }));
+    
+    for (const tx of dataWithHash) {
+      if (tx.status === 'pending') {
+        try {
+          const response = await fetch('/api/midtrans/check-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: tx.id })
+          });
+          const result = await response.json();
+          
+          if (result.success) {
+            const index = dataWithHash.findIndex(t => t.id === tx.id);
+            if (index !== -1 && dataWithHash[index].status !== result.status) {
+              dataWithHash[index] = { ...dataWithHash[index], status: result.status };
+            }
+          }
+        } catch (error) {
+          console.error(`Check status ${tx.id} error:`, error);
+        }
+      }
+    }
+    
+    setTransactions(dataWithHash);
+    verifyAllTransactions(dataWithHash);
+  };
+  
   useEffect(() => {
     const fetchData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
 
       if (user) {
-        console.log('🔍 [DEBUG] User:', user.id);
-        const { data, error } = await supabase
-          .from("transactions")
-          .select(`
-            *,
-            transaction_hashes (
-              block_hash,
-              prev_hash,
-              nonce,
-              block_height
-            )
-          `)
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false });
-
-        console.log('🔍 [DEBUG] Query result:', JSON.stringify({ data, error }, null, 2));
-
-        if (!error && data) {
-          // Gabungkan data hash ke transaksi (transaction_hashes adalah OBJECT, bukan array!)
-          const dataWithHash = data.map(tx => {
-            const mapped = ({
-              ...tx,
-              block_hash: tx.transaction_hashes?.block_hash,
-              prev_hash: tx.transaction_hashes?.prev_hash,
-              nonce: tx.transaction_hashes?.nonce,
-              block_height: tx.transaction_hashes?.block_height
-            });
-            console.log(`🔍 [DEBUG] Mapped tx ${tx.id}:`, JSON.stringify(mapped, null, 2));
-            return mapped;
-          });
-          console.log('🔍 [DEBUG] Data with hash:', JSON.stringify(dataWithHash, null, 2));
-          setTransactions(dataWithHash);
-          // Verifikasi semua transaksi setelah mengambil data
-          verifyAllTransactions(dataWithHash);
-        } else if (error) {
-          console.error('❌ [DEBUG] Query error:', error);
-        }
+        await refreshAllData(user);
       }
       setLoading(false);
     };
     fetchData();
+    
+    const interval = setInterval(() => {
+      refreshAllData();
+    }, 5000);
+    
+    return () => clearInterval(interval);
   }, [supabase]);
 
   if (loading) {
@@ -215,12 +239,19 @@ export default function TransactionsPage() {
                   <div className="flex flex-col items-end gap-2">
                     <StatusBadge status={tx.status} />
                     <p className="text-lg font-black text-primary">Rp {tx.amount.toLocaleString()}</p>
+                    {tx.status === 'pending' && (
+                      <button
+                        onClick={() => checkMidtransStatus(tx.id)}
+                        disabled={checkingStatus[tx.id]}
+                        className="px-3 py-1.5 bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[10px] font-black uppercase rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {checkingStatus[tx.id] ? '⏳ Cek...' : '🔄 Cek Status Midtrans'}
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Verification & Blockchain Info */}
                 <div className="space-y-3">
-                  {/* Verification Status */}
                   <div className="flex items-center gap-2">
                     {verificationStatus[tx.id] === true && (
                       <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 px-3 py-1.5 rounded-xl">
@@ -242,7 +273,6 @@ export default function TransactionsPage() {
                     )}
                   </div>
 
-                  {/* Blockchain Info */}
                   {tx.block_hash && (
                     <div className="bg-zinc-950/50 border border-white/5 rounded-xl p-4 space-y-3">
                       <p className="text-[10px] font-black text-zinc-400 uppercase">⛓️ Blockchain Info</p>

@@ -15,7 +15,17 @@ CREATE POLICY "Enable read access for all users"
   ON public.transaction_hashes FOR SELECT
   USING (true);
 
-CREATE POLICY "Enable insert access for authenticated users"
+CREATE POLICY "Enable insert access for authenticated users"# Midtrans Sandbox
+NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=SB-Mid-client-KAMU_DISINI
+MIDTRANS_SERVER_KEY=SB-Mid-server-KAMU_DISINI# Midtrans Sandbox
+NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=SB-Mid-client-KAMU_DISINI
+MIDTRANS_SERVER_KEY=SB-Mid-server-KAMU_DISINI# Midtrans Sandbox
+NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=SB-Mid-client-KAMU_DISINI
+MIDTRANS_SERVER_KEY=SB-Mid-server-KAMU_DISINI# Midtrans Sandbox
+NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=SB-Mid-client-KAMU_DISINI
+MIDTRANS_SERVER_KEY=SB-Mid-server-KAMU_DISINI# Midtrans Sandbox
+NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=SB-Mid-client-KAMU_DISINI
+MIDTRANS_SERVER_KEY=SB-Mid-server-KAMU_DISINI
   ON public.transaction_hashes FOR INSERT
   WITH CHECK (auth.role() = 'authenticated');
 

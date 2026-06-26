@@ -1,6 +1,6 @@
 "use client";
 import { useParams, useRouter } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/footer";
 import { createClient } from "@/lib/supabase/client";
@@ -10,10 +10,28 @@ import FormAccount from "./_components/FormAccount";
 import PaymentAccordion from "./_components/PaymentAccordion";
 import Web3Payment from "./_components/Web3Payment";
 
+// Script untuk load Midtrans Snap secara dinamis
+function loadMidtransScript() {
+  return new Promise((resolve, reject) => {
+    if (window.snap) {
+      resolve(window.snap);
+      return;
+    }
+    
+    const script = document.createElement('script');
+    script.src = 'https://app.sandbox.midtrans.com/snap/snap.js';
+    script.setAttribute('data-client-key', process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || '');
+    script.onload = () => resolve(window.snap);
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+}
+
 export default function OrderPage() {
   const { slug } = useParams();
   const router = useRouter();
   const gameData = useMemo(() => getGameData(slug), [slug]);
+  const supabase = createClient();
 
   const [activeCategory, setActiveCategory] = useState(Object.keys(gameData.denominations)[0]);
   const [selectedNominal, setSelectedNominal] = useState(null);
@@ -21,19 +39,54 @@ export default function OrderPage() {
   const [openSection, setOpenSection] = useState("ewallet");
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentMode, setPaymentMode] = useState("web3"); // "web3" or "traditional"
+  const [userProfile, setUserProfile] = useState(null);
+
+  const selectedItem = gameData.denominations[activeCategory]?.find(
+    (i) => i.id === selectedNominal
+  );
+  const selectedMethod = paymentMethods
+    .flatMap((g) => g.options)
+    .find((o) => o.id === selectedPayment);
+  
+  const calculateTotalPrice = () => {
+    if (!selectedItem) return null;
+    if (paymentMode === "traditional" && selectedMethod) {
+      return selectedItem.price + selectedMethod.fee;
+    }
+    return selectedItem.price;
+  };
+  
+  const totalPrice = calculateTotalPrice();
+  const canCheckout = selectedNominal && (paymentMode === "web3" || selectedPayment);
+
+  // Fetch user profile
+  useEffect(() => {
+    const fetchProfile = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+        setUserProfile(data);
+      }
+    };
+    fetchProfile();
+  }, [supabase]);
 
   const handlePayment = async () => {
-    if (!selectedNominal || !selectedPayment) return;
+    if (!selectedNominal || !selectedItem || !totalPrice) return;
+    if (paymentMode === "traditional" && !selectedPayment) return;
 
     // Cek login hanya saat mau bayar
-    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       // Simpan state order sementara biar gak hilang setelah login
       sessionStorage.setItem(
         "pending_order",
-        JSON.stringify({ slug, selectedNominal, selectedPayment })
+        JSON.stringify({ slug, selectedNominal, selectedPayment, paymentMode })
       );
       router.push("/login?redirect=" + encodeURIComponent(`/order/${slug}`));
       return;
@@ -42,92 +95,109 @@ export default function OrderPage() {
     setIsProcessing(true);
 
     try {
-      // Insert transaction to database with status "pending"
-      const transactionId = `TRX-${Date.now()}`;
-      const { error } = await supabase.from("transactions").insert({
-        id: transactionId,
-        user_id: user.id,
-        game: gameData.name,
-        item: selectedItem.amount,
-        amount: totalPrice,
-        status: "pending", // status pending dulu
-        payment_method: selectedMethod.name,
-      });
+      // Pastikan profile user ada di database!
+      let { data: currentProfile, error: profileGetError } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      
+      if (profileGetError || !currentProfile) {
+        console.log('Profile not found, creating one...');
+        const { error: createProfileError } = await supabase.from('profiles').insert({
+          id: user.id,
+          name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
+          email: user.email,
+        });
+        
+        if (createProfileError) {
+          console.error('❌ Error creating profile:', createProfileError);
+          throw createProfileError;
+        }
+      }
 
-      if (!error) {
-        try {
-          // Step 1: Pastikan profile user ada di database!
-          let { data: currentProfile, error: profileGetError } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          
-          if (profileGetError || !currentProfile) {
-            console.log('Profile not found, creating one...');
-            const { error: createProfileError } = await supabase.from('profiles').insert({
-              id: user.id,
-              name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
-              email: user.email,
-              points: 0,
-            });
-            
-            if (createProfileError) {
-              console.error('❌ Error creating profile:', createProfileError);
-              throw createProfileError;
-            }
-          }
-          
-          // Simpan data transaksi ke session storage untuk halaman payment
-          sessionStorage.setItem(`payment_${transactionId}`, JSON.stringify({
+      // Jika Traditional Payment: Gunakan Midtrans
+      if (paymentMode === "traditional") {
+        const transactionId = `TRX-${Date.now()}`;
+        
+        // 1. Insert transaksi ke Supabase dulu (status pending)
+        const { error: txError } = await supabase.from("transactions").insert({
+          id: transactionId,
+          user_id: user.id,
+          game: gameData.name,
+          item: selectedItem.amount,
+          amount: totalPrice,
+          status: "pending",
+          payment_method: selectedMethod.name,
+        });
+
+        if (txError) throw txError;
+
+        // 2. Load script Midtrans Snap
+        const snap = await loadMidtransScript();
+
+        // 3. Panggil API kita buat bikin token Midtrans
+        const response = await fetch("/api/midtrans/create-transaction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: transactionId,
+            amount: totalPrice,
             gameName: gameData.name,
-            nominal: selectedItem.amount,
-            totalPrice: totalPrice,
-            selectedPayment: selectedPayment
-          }));
-          
-          // Arahkan ke halaman menunggu pembayaran
-          router.push(`/payment/${transactionId}`);
-        } catch (err) {
-          console.error("Error in payment flow:", err);
-          let errorText = "Gagal memproses pembayaran";
-          if (typeof err === 'object' && err !== null) {
-            if (err.message) errorText = err.message;
-            else if (err.code) errorText = `Error code: ${err.code}`;
-            else errorText = JSON.stringify(err, null, 2);
-          } else if (typeof err === 'string') {
-            errorText = err;
+            itemName: selectedItem.amount,
+            customerName: currentProfile?.name || user.user_metadata?.name || 'User',
+            customerEmail: currentProfile?.email || user.email,
+          }),
+        });
+
+        const midtransData = await response.json();
+        if (!midtransData.token) throw new Error("Failed to get Midtrans token");
+
+        // 4. Tampilkan Midtrans Snap Popup
+        snap.pay(midtransData.token, {
+          onSuccess: async function(result) {
+            // Auto check status after success
+            try {
+              await fetch("/api/midtrans/check-status", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ orderId: transactionId }),
+              });
+            } catch (e) {
+              console.error("Failed to check status after payment", e);
+            }
+            alert("✅ Pembayaran berhasil!");
+            router.push("/transactions");
+          },
+          onPending: function(result) {
+            alert("⏳ Menunggu pembayaran!");
+            router.push("/transactions");
+          },
+          onError: function(result) {
+            console.error("Midtrans payment error:", result);
+            alert("❌ Pembayaran gagal!");
+          },
+          onClose: function() {
+            alert("⚠️ Anda menutup popup tanpa menyelesaikan pembayaran");
           }
-          alert("❌ Gagal memproses pembayaran: " + errorText);
-        }
-      } else {
-        console.error("Supabase error:", error);
-        let errorText = "Gagal memproses pembayaran";
-        if (typeof error === 'object' && error !== null) {
-          if (error.message) errorText = error.message;
-          else if (error.code) errorText = `Error code: ${error.code}`;
-          else errorText = JSON.stringify(error, null, 2);
-        } else if (typeof error === 'string') {
-          errorText = error;
-        }
-        alert("❌ Gagal memproses pembayaran: " + errorText);
+        });
+      } 
+      // Jika Web3: Tetap seperti biasa
+      else {
+        // (web3 payment ditangani oleh komponen Web3Payment)
+        console.log("Web3 payment handled by Web3Payment component");
       }
     } catch (err) {
-      console.error(err);
-      alert("❌ Terjadi kesalahan: " + (err.message || err));
+      console.error("Error in payment flow:", err);
+      let errorText = "Gagal memproses pembayaran";
+      if (typeof err === 'object' && err !== null) {
+        if (err.message) errorText = err.message;
+        else if (err.code) errorText = `Error code: ${err.code}`;
+        else errorText = JSON.stringify(err, null, 2);
+      } else if (typeof err === 'string') {
+        errorText = err;
+      }
+      alert("❌ Gagal memproses pembayaran: " + errorText);
     }
 
     setIsProcessing(false);
   };
-
-  const selectedItem = gameData.denominations[activeCategory]?.find(
-    (i) => i.id === selectedNominal
-  );
-  const selectedMethod = paymentMethods
-    .flatMap((g) => g.options)
-    .find((o) => o.id === selectedPayment);
-  const totalPrice =
-    selectedItem && selectedMethod
-      ? selectedItem.price + selectedMethod.fee
-      : null;
-
-  const canCheckout = selectedNominal && selectedPayment;
 
   return (
     <main className="min-h-screen bg-[#09090b] text-white">
@@ -178,13 +248,19 @@ export default function OrderPage() {
                     <span className="text-zinc-400">{selectedItem.amount}</span>
                     <span>Rp {selectedItem.price.toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-zinc-400">Biaya {selectedMethod.name}</span>
-                    <span>Rp {selectedMethod.fee.toLocaleString()}</span>
-                  </div>
+                  {paymentMode === "traditional" && selectedMethod && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Biaya {selectedMethod.name}</span>
+                      <span>Rp {selectedMethod.fee.toLocaleString()}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-xs font-black pt-2 border-t border-white/5">
                     <span>Total</span>
-                    <span className="text-primary">Rp {totalPrice.toLocaleString()}</span>
+                    <span className="text-primary">
+                      {paymentMode === "traditional" 
+                        ? `Rp ${totalPrice.toLocaleString()}` 
+                        : `Rp ${selectedItem.price.toLocaleString()}`}
+                    </span>
                   </div>
                 </div>
               )}
@@ -255,26 +331,26 @@ export default function OrderPage() {
 
             {/* Payment Mode Toggle */}
             <section className="bg-[#18181b] border border-white/5 rounded-[2.5rem] p-6">
-              <div className="flex gap-3 mb-6">
+              <div className="grid grid-cols-2 gap-3 mb-6">
                 <button
                   onClick={() => setPaymentMode("web3")}
-                  className={`flex-1 py-3 rounded-xl text-xs font-black uppercase transition-all border ${
+                  className={`py-3 rounded-xl text-xs font-black uppercase transition-all border ${
                     paymentMode === "web3"
                       ? "bg-primary text-black border-primary"
                       : "bg-white/5 text-zinc-500 border-white/10 hover:border-white/20"
                   }`}
                 >
-                  ⚡ Web3 (MetaMask)
+                  ⚡ Web3 (ZPH)
                 </button>
                 <button
                   onClick={() => setPaymentMode("traditional")}
-                  className={`flex-1 py-3 rounded-xl text-xs font-black uppercase transition-all border ${
+                  className={`py-3 rounded-xl text-xs font-black uppercase transition-all border ${
                     paymentMode === "traditional"
                       ? "bg-primary text-black border-primary"
                       : "bg-white/5 text-zinc-500 border-white/10 hover:border-white/20"
                   }`}
                 >
-                  💳 Traditional
+                  💳 Traditional (Midtrans)
                 </button>
               </div>
 
@@ -304,7 +380,7 @@ export default function OrderPage() {
               )}
             </section>
 
-            {/* Traditional Payment Button */}
+            {/* Payment Button (Traditional) */}
             {paymentMode === "traditional" && (
               <button
                 onClick={handlePayment}
